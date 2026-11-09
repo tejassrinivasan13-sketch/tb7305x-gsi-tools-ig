@@ -1,0 +1,94 @@
+name: TB-7305X Halium 9 ARM64 boot candidate
+
+on:
+  push:
+    branches:
+      - 'codex/ut-kernel-first-build'
+    paths:
+      - 'porting/deviceinfo-tb7305x-arm64'
+      - 'porting/tb7305x-halium-boot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-halium-boot:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out port configuration and stock DTB
+        uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            porting/deviceinfo-tb7305x-arm64
+            tb7305x-stock-exact.dtb
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ca-certificates cpio curl flex git jq kmod libssl-dev libtinfo5 python3 unzip wget xz-utils
+
+      - name: Fetch UBports build tools and kernel sources
+        run: |
+          git clone --depth 1 https://gitlab.com/ubports/porting/community-ports/halium-generic-adaptation-build-tools.git adaptation
+          cp porting/deviceinfo-tb7305x-arm64 adaptation/deviceinfo
+          cp tb7305x-stock-exact.dtb adaptation/
+          cd adaptation
+          ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out" -c
+          echo "=== downloaded build sources ==="
+          find "$RUNNER_TEMP/tb7305x-work/downloads" -maxdepth 2 -type d | sort | head -n 60
+          test -d "$RUNNER_TEMP/tb7305x-work/downloads/android_kernel_lenovo_mt8765_P"
+
+      - name: Add Halium kernel options and build boot image
+        run: |
+          set -euo pipefail
+          export TB7305X_STOCK_DTB="$GITHUB_WORKSPACE/tb7305x-stock-exact.dtb"
+          python3 - "$GITHUB_WORKSPACE/adaptation" <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path(sys.argv[1])
+          scripts = list(root.rglob("build-kernel.sh"))
+          if len(scripts) != 1:
+              raise SystemExit(f"expected one build-kernel.sh, found {len(scripts)}")
+          path = scripts[0]
+          source = path.read_text()
+          defconfig = 'make O="$OUT" $deviceinfo_kernel_defconfig'
+          if defconfig not in source:
+              raise SystemExit("could not locate kernel defconfig command")
+          fragment = defconfig + '''
+          "$KERNEL_DIR/scripts/config" --file "$OUT/.config" \\
+              --enable DEVTMPFS --enable FHANDLE --enable SYSVIPC --enable NAMESPACES \\
+              --enable UTS_NS --enable IPC_NS --enable USER_NS --enable PID_NS --enable NET_NS --enable VT
+          make O="$OUT" olddefconfig
+          '''
+          source = source.replace(defconfig, fragment, 1)
+          pattern = r'make O="\\$OUT" \\$MAKEOPTS -j\\$\\(nproc --all\\)'
+          source, count = re.subn(pattern, 'make O="$OUT" $MAKEOPTS -j$(nproc --all) Image.gz modules', source, count=1)
+          if count != 1:
+              raise SystemExit("could not replace kernel default build target")
+          marker = 'ls "$OUT/arch/$ARCH/boot/"*Image*'
+          if marker not in source:
+              raise SystemExit("could not locate built-image check")
+          source = source.replace(marker, '''
+          cat "$OUT/arch/arm64/boot/Image.gz" "$TB7305X_STOCK_DTB" > "$OUT/arch/arm64/boot/Image.gz-dtb"
+          ls "$OUT/arch/$ARCH/boot/"*Image*
+          ''', 1)
+          path.write_text(source)
+          print(f"Patched {path}")
+          PY
+          cd "$GITHUB_WORKSPACE/adaptation"
+          ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out" -k
+          mkdir -p "$GITHUB_WORKSPACE/halium-boot-artifact"
+          cp "$RUNNER_TEMP/tb7305x-work/tmp/partitions/boot.img" "$GITHUB_WORKSPACE/halium-boot-artifact/"
+          cp "$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ/.config" "$GITHUB_WORKSPACE/halium-boot-artifact/kernel.config"
+          cp "$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ/arch/arm64/boot/Image.gz-dtb" "$GITHUB_WORKSPACE/halium-boot-artifact/"
+          sha256sum "$GITHUB_WORKSPACE/halium-boot-artifact/"* > "$GITHUB_WORKSPACE/halium-boot-artifact/SHA256SUMS.txt"
+          ls -l "$GITHUB_WORKSPACE/halium-boot-artifact"
+
+      - name: Upload experimental Halium boot image
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb7305x-halium9-arm64-boot-candidate
+          path: halium-boot-artifact/
+          retention-days: 30
