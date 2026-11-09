@@ -102,8 +102,9 @@ jobs:
           if marker not in source:
               raise SystemExit("could not locate built-image check")
           source = source.replace(marker, """
-          fdtoverlay -i "$TB7305X_STOCK_DTB" -o "$OUT/arch/arm64/boot/dts/mediatek/mt6739-tb7305x-merged.dtb" "$OUT/arch/arm64/boot/dts/mediatek/mt8765_P.dtb"
-          cat "$OUT/arch/arm64/boot/Image.gz" "$OUT/arch/arm64/boot/dts/mediatek/mt6739-tb7305x-merged.dtb" > "$OUT/arch/arm64/boot/Image.gz-dtb"
+          # Keep only the stock base DTB in boot.img. The bootloader applies the
+          # separately packaged mt8765_P overlay from dtbo.img exactly once.
+          cat "$OUT/arch/arm64/boot/Image.gz" "$TB7305X_STOCK_DTB" > "$OUT/arch/arm64/boot/Image.gz-dtb"
           ls "$OUT/arch/$ARCH/boot/"*Image*
           """, 1)
           path.write_text(source)
@@ -148,12 +149,13 @@ jobs:
           PY
           cat > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/README.txt" <<'EOF'
           EXPERIMENTAL, UNFLASHED TEST CANDIDATE
-          This artifact merges the kernel source tree's mt8765_P overlay into
-          the stock TB-7305X base DTB before packaging it with the Halium kernel.
-          The previous candidate paired mismatched device-tree pieces. This
-          candidate is still untested; the kernel source has known device-tree
-          problems. Do not flash boot.img or dtbo.img. Restore the stock DTBO
-          before any temporary boot test; this artifact is for diagnosis only.
+          boot.img contains the kernel plus the stock TB-7305X base DTB only.
+          dtbo.img contains the kernel source tree's mt8765_P device-tree overlay.
+          These are a matched pair: the bootloader should apply the overlay once.
+          Do not combine this boot.img with a boot image that already has the
+          overlay merged into its DTB. This candidate is still untested and the
+          kernel source has known device-tree problems. Do not flash these files.
+          This artifact is for diagnosis only.
           EOF
           sha256sum "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"* > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/SHA256SUMS.txt"
           ls -lh "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate"
