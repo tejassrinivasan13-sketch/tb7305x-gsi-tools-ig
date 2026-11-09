@@ -1,0 +1,24 @@
+# Candidate configuration for generating a Halium 9 ARM64 boot image.
+# Boot offsets use the TB-7305X TWRP BoardConfig reference and must be validated on-device.
+deviceinfo_name="Lenovo Tab M7 LTE"
+deviceinfo_manufacturer="Lenovo"
+deviceinfo_codename="mt8765_P"
+deviceinfo_arch="aarch64"
+
+deviceinfo_kernel_source="https://github.com/mlm-games/android_kernel_lenovo_mt8765_P"
+deviceinfo_kernel_source_branch="main"
+deviceinfo_kernel_defconfig="mt8765_P_defconfig"
+deviceinfo_kernel_image_name="Image.gz-dtb"
+deviceinfo_halium_version="9"
+
+deviceinfo_kernel_cmdline="console=tty0 bootopt=64S3,32S1,32S1 buildvariant=user veritykeyid=id:7e4333f9bba00adfe0ede979e28ed1920492b40f"
+deviceinfo_bootimg_header_version="1"
+deviceinfo_bootimg_partition_size="16777216"
+deviceinfo_flash_pagesize="2048"
+deviceinfo_flash_offset_base="0x00000000"
+deviceinfo_flash_offset_kernel="0x40080000"
+deviceinfo_flash_offset_ramdisk="0x45000000"
+deviceinfo_flash_offset_second="0x40800000"
+deviceinfo_flash_offset_tags="0x44000000"
+
+deviceinfo_bootimg_prebuilt_dtb="tb7305x-stock-exact.dtb"
