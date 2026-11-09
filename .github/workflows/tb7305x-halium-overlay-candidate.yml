@@ -53,6 +53,16 @@ jobs:
           lines.insert(index, compat)
           path.write_text("".join(lines))
           PY
+          python3 - "$kernel_src/tools/dct/data/EintData.py" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          source = path.read_text()
+          old = "for (key, value) in list(map.items()):"
+          new = "for (key, value) in map.copy().items():"
+          if old not in source:
+              raise SystemExit("expected converted EintData loop was not found")
+          path.write_text(source.replace(old, new, 1))
+          PY
           python3 - "$GITHUB_WORKSPACE/adaptation" <<'PY'
           import pathlib, sys
           root = pathlib.Path(sys.argv[1])
