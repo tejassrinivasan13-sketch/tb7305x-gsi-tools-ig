@@ -1,0 +1,132 @@
+name: TB-7305X overlay kernel test candidate
+
+on:
+  push:
+    branches:
+      - 'codex/ut-kernel-first-build'
+    paths:
+      - '.github/workflows/tb7305x-halium-overlay-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-overlay-candidate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out port configuration and stock DTB
+        uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            porting/deviceinfo-tb7305x-arm64
+            tb7305x-stock-exact.dtb
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ca-certificates cpio curl fakeroot flex git jq kmod libssl-dev libtinfo5 python3 unzip wget xz-utils
+
+      - name: Fetch UBports build tools and kernel sources
+        run: |
+          git clone --depth 1 https://gitlab.com/ubports/porting/community-ports/halium-generic-adaptation-build-tools.git adaptation
+          cp porting/deviceinfo-tb7305x-arm64 adaptation/deviceinfo
+          cp tb7305x-stock-exact.dtb adaptation/
+          cd adaptation
+          ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out" -c
+          test -d "$RUNNER_TEMP/tb7305x-work/downloads/android_kernel_lenovo_mt8765_P"
+
+      - name: Build experimental kernel, overlay, and boot image
+        run: |
+          set -euo pipefail
+          export TB7305X_STOCK_DTB="$GITHUB_WORKSPACE/tb7305x-stock-exact.dtb"
+          python3 - "$GITHUB_WORKSPACE/adaptation" <<'PY'
+          import pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          scripts = list(root.rglob("build-kernel.sh"))
+          if len(scripts) != 1:
+              raise SystemExit(f"expected one build-kernel.sh, found {len(scripts)}")
+          path = scripts[0]
+          source = path.read_text()
+          defconfig = 'make O="$OUT" $MAKEOPTS $deviceinfo_kernel_defconfig'
+          if defconfig not in source:
+              raise SystemExit("could not locate kernel defconfig command")
+          fragment = defconfig + """
+          "$KERNEL_DIR/scripts/config" --file "$OUT/.config" \\
+              --enable DEVTMPFS --enable FHANDLE --enable SYSVIPC --enable NAMESPACES \\
+              --enable UTS_NS --enable IPC_NS --enable USER_NS --enable PID_NS --enable NET_NS --enable VT
+          make O="$OUT" olddefconfig
+          """
+          source = source.replace(defconfig, fragment, 1)
+          compile = 'make O="$OUT" $MAKEOPTS -j$(nproc --all)'
+          if compile not in source:
+              raise SystemExit("could not locate kernel build command")
+          source = source.replace(compile, compile + ' Image.gz modules dtbs', 1)
+          marker = 'ls "$OUT/arch/$ARCH/boot/"*Image*'
+          if marker not in source:
+              raise SystemExit("could not locate built-image check")
+          source = source.replace(marker, """
+          cat "$OUT/arch/arm64/boot/Image.gz" "$TB7305X_STOCK_DTB" > "$OUT/arch/arm64/boot/Image.gz-dtb"
+          ls "$OUT/arch/$ARCH/boot/"*Image*
+          """, 1)
+          path.write_text(source)
+          print(f"Patched {path}")
+          PY
+          cd "$GITHUB_WORKSPACE/adaptation"
+          python3 - "$GITHUB_WORKSPACE/adaptation/build-tarball-mainline.sh" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          source = path.read_text()
+          old = 'cp -av overlay/* "${dir}/"'
+          new = 'if [ -d overlay ]; then cp -av overlay/. "${dir}/"; fi'
+          if old not in source:
+              raise SystemExit("could not locate optional overlay copy command")
+          path.write_text(source.replace(old, new, 1))
+          PY
+          ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out"
+          kernel_obj="$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ"
+          test -f "$kernel_obj/arch/arm64/boot/Image.gz-dtb"
+          overlay_dtb="$kernel_obj/arch/arm64/boot/dts/mediatek/mt8765_P.dtb"
+          test -f "$overlay_dtb"
+          mkdir -p "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate"
+          cp "$RUNNER_TEMP/tb7305x-work/tmp/partitions/boot.img" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
+          cp "$kernel_obj/arch/arm64/boot/Image.gz-dtb" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
+          cp "$kernel_obj/arch/arm64/boot/dts/mediatek/mt6739.dtb" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
+          cp "$overlay_dtb" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
+          cp "$kernel_obj/.config" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/kernel.config"
+          cp "$kernel_obj/arch/arm64/boot/dts/dtboimg.cfg" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
+          python3 - "$overlay_dtb" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/dtbo.img" <<'PY'
+          import pathlib, struct, sys
+          data = pathlib.Path(sys.argv[1]).read_bytes()
+          if data[:4] != bytes.fromhex("d00dfeed"):
+              raise SystemExit("overlay output is not a flattened device tree")
+          page = 2048
+          header_size = 32
+          entry_size = 32
+          entries_offset = header_size
+          data_offset = ((entries_offset + entry_size + page - 1) // page) * page
+          total_size = data_offset + len(data)
+          header = struct.pack(">8I", 0xd7b7ab1e, total_size, header_size, entry_size, 1, entries_offset, page, 0)
+          entry = struct.pack(">8I", len(data), data_offset, 0, 0, 0, 0, 0, 0)
+          pathlib.Path(sys.argv[2]).write_bytes(header + entry + bytes(data_offset - header_size - entry_size) + data)
+          PY
+          cat > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/README.txt" <<'EOF'
+          EXPERIMENTAL, UNFLASHED TEST CANDIDATE
+          This artifact adds the kernel source tree's mt8765_P device-tree overlay
+          to the existing experimental Halium boot image. The DTBO image uses
+          the stock firmware's observed format: DTBO v0, 2048-byte page size,
+          one entry with id 0. It has not been tested on the tablet.
+          Do not flash boot.img or dtbo.img. This build is for inspection and
+          further diagnosis only.
+          EOF
+          sha256sum "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"* > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/SHA256SUMS.txt"
+          ls -lh "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate"
+
+      - name: Upload experimental overlay candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb7305x-overlay-kernel-test-candidate
+          path: tb7305x-overlay-test-candidate/
+          retention-days: 30
