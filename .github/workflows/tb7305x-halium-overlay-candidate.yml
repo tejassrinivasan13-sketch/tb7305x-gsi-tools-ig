@@ -44,7 +44,14 @@ jobs:
           export TB7305X_STOCK_DTB="$GITHUB_WORKSPACE/tb7305x-stock-exact.dtb"
           kernel_src="$RUNNER_TEMP/tb7305x-work/downloads/android_kernel_lenovo_mt8765_P"
           find "$kernel_src/tools/dct" -name '*.py' -print0 | xargs -0 -r python3 -m lib2to3 -w -n
-          sed -i '1i\\ndef cmp(a, b): return (a > b) - (a < b)\\n' "$kernel_src/tools/dct/DrvGen.py"
+          python3 - "$kernel_src/tools/dct/DrvGen.py" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          lines = path.read_text().splitlines(keepends=True)
+          index = 1 if lines and lines[0].startswith("#!") else 0
+          lines.insert(index, "def cmp(a, b): return (a > b) - (a < b)\\n")
+          path.write_text("".join(lines))
+          PY
           python3 - "$GITHUB_WORKSPACE/adaptation" <<'PY'
           import pathlib, sys
           root = pathlib.Path(sys.argv[1])
