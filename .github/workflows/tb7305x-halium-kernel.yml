@@ -1,4 +1,4 @@
-name: TB-7305X experimental Ubuntu Touch kernel
+name: TB-7305X experimental Ubuntu Touch kernels
 
 on:
   push:
@@ -37,51 +37,70 @@ jobs:
           echo "$HOME/tc-arm/bin" >> "$GITHUB_PATH"
           "$HOME/tc-arm/bin/arm-linux-androideabi-gcc" --version | head -n 1
 
+      - name: Download Android ARM64 4.9 cross compiler
+        run: |
+          mkdir -p "$HOME/tc-arm64"
+          curl -fL --retry 3 --connect-timeout 20 \
+            "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/pie-release.tar.gz" \
+            -o "$RUNNER_TEMP/arm64-tc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/arm64-tc.tar.gz" -C "$HOME/tc-arm64"
+          echo "$HOME/tc-arm64/bin" >> "$GITHUB_PATH"
+          "$HOME/tc-arm64/bin/aarch64-linux-android-gcc" --version | head -n 1
+
       - name: Get TB-7305X kernel source
         run: |
           git clone --depth 1 https://github.com/mlm-games/android_kernel_lenovo_mt8765_P.git kernel
           git -C kernel rev-parse HEAD
           test "$(git -C kernel rev-parse HEAD)" = "ae0df7bb3e30405bf45df4e33cc3a58e08ed828f"
 
-      - name: Configure Halium requirements
+      - name: Configure Halium ARM kernel
         run: |
           make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-androideabi- O=out mt8765_GO_defconfig
           kernel/scripts/config --file kernel/out/.config \
-            --enable DEVTMPFS \
-            --enable FHANDLE \
-            --enable SYSVIPC \
-            --enable NAMESPACES \
-            --enable UTS_NS \
-            --enable IPC_NS \
-            --enable USER_NS \
-            --enable PID_NS \
-            --enable NET_NS \
-            --enable VT
+            --enable DEVTMPFS --enable FHANDLE --enable SYSVIPC --enable NAMESPACES \
+            --enable UTS_NS --enable IPC_NS --enable USER_NS --enable PID_NS --enable NET_NS --enable VT
           make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-androideabi- O=out olddefconfig
-          echo "=== Halium-related config ==="
           grep -E '^(CONFIG_(DEVTMPFS|FHANDLE|SYSVIPC|NAMESPACES|UTS_NS|IPC_NS|USER_NS|PID_NS|NET_NS|VT)=|# CONFIG_(DEVTMPFS|FHANDLE|SYSVIPC|NAMESPACES|UTS_NS|IPC_NS|USER_NS|PID_NS|NET_NS|VT) is not set)' kernel/out/.config || true
 
-      - name: Compile 32-bit TB-7305X kernel
+      - name: Compile ARM kernel
         run: |
           set -o pipefail
-          make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-androideabi- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- O=out \
-            HOSTCFLAGS="-fcommon" KCFLAGS="-Wno-error" \
-            -j"$(nproc)" zImage 2>&1 | tee "$RUNNER_TEMP/kernel-build.log"
+          make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-androideabi- O=out \
+            HOSTCFLAGS="-fcommon" KCFLAGS="-Wno-error" -j"$(nproc)" zImage \
+            2>&1 | tee "$RUNNER_TEMP/kernel-arm-build.log"
+
+      - name: Configure Halium ARM64 kernel
+        run: |
+          make -C kernel ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- O=out-arm64 mt8765_P_defconfig
+          kernel/scripts/config --file kernel/out-arm64/.config \
+            --enable DEVTMPFS --enable FHANDLE --enable SYSVIPC --enable NAMESPACES \
+            --enable UTS_NS --enable IPC_NS --enable USER_NS --enable PID_NS --enable NET_NS --enable VT
+          make -C kernel ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- O=out-arm64 olddefconfig
+          grep -E '^(CONFIG_(DEVTMPFS|FHANDLE|SYSVIPC|NAMESPACES|UTS_NS|IPC_NS|USER_NS|PID_NS|NET_NS|VT)=|# CONFIG_(DEVTMPFS|FHANDLE|SYSVIPC|NAMESPACES|UTS_NS|IPC_NS|USER_NS|PID_NS|NET_NS|VT) is not set)' kernel/out-arm64/.config || true
+
+      - name: Compile ARM64 kernel
+        run: |
+          set -o pipefail
+          make -C kernel ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- O=out-arm64 \
+            HOSTCFLAGS="-fcommon" KCFLAGS="-Wno-error" -j"$(nproc)" Image.gz \
+            2>&1 | tee "$RUNNER_TEMP/kernel-arm64-build.log"
 
       - name: Collect build output
         run: |
           mkdir -p out-artifacts
           cp kernel/out/arch/arm/boot/zImage out-artifacts/
-          cp kernel/out/.config out-artifacts/kernel.config
+          cp kernel/out/.config out-artifacts/kernel-arm.config
+          cp "$RUNNER_TEMP/kernel-arm-build.log" out-artifacts/
+          cp kernel/out-arm64/arch/arm64/boot/Image.gz out-artifacts/
+          cp kernel/out-arm64/.config out-artifacts/kernel-arm64.config
+          cp "$RUNNER_TEMP/kernel-arm64-build.log" out-artifacts/
           cp tb7305x-stock-exact.dtb out-artifacts/
-          cp "$RUNNER_TEMP/kernel-build.log" out-artifacts/
-          (cd out-artifacts && sha256sum kernel.config zImage tb7305x-stock-exact.dtb kernel-build.log > SHA256SUMS.txt)
+          (cd out-artifacts && sha256sum * > SHA256SUMS.txt)
           find out-artifacts -type f -printf '%P %s bytes\n' | sort
 
       - name: Upload experimental kernel artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tb7305x-halium-kernel-experimental
+          name: tb7305x-halium-kernels-experimental
           path: out-artifacts/
           retention-days: 30
