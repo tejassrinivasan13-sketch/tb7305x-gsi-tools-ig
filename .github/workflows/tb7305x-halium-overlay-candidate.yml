@@ -49,7 +49,16 @@ jobs:
           path = pathlib.Path(sys.argv[1])
           lines = path.read_text().splitlines(keepends=True)
           index = 1 if lines and lines[0].startswith("#!") else 0
-          compat = "import builtins, string" + chr(10) + "def cmp(a, b): return (a > b) - (a < b)" + chr(10) + "builtins.cmp = cmp" + chr(10) + "string.atoi = int" + chr(10) + "string.atof = float" + chr(10)
+          compat = ("import builtins, string, configparser" + chr(10)
+                    + "def cmp(a, b): return (a > b) - (a < b)" + chr(10)
+                    + "builtins.cmp = cmp" + chr(10)
+                    + "string.atoi = int" + chr(10)
+                    + "string.atof = float" + chr(10)
+                    + "_ConfigParser = configparser.ConfigParser" + chr(10)
+                    + "def _permissive_config_parser(*args, **kwargs):" + chr(10)
+                    + "    kwargs.setdefault('strict', False)" + chr(10)
+                    + "    return _ConfigParser(*args, **kwargs)" + chr(10)
+                    + "configparser.ConfigParser = _permissive_config_parser" + chr(10))
           lines.insert(index, compat)
           path.write_text("".join(lines))
           PY
