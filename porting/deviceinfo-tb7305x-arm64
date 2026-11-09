@@ -13,6 +13,8 @@ deviceinfo_halium_version="9"
 
 deviceinfo_kernel_cmdline="console=tty0 bootopt=64S3,32S1,32S1 buildvariant=user veritykeyid=id:7e4333f9bba00adfe0ede979e28ed1920492b40f"
 deviceinfo_bootimg_header_version="1"
+deviceinfo_bootimg_os_version="9.0.0"
+deviceinfo_bootimg_os_patch_level="2021-10"
 deviceinfo_bootimg_partition_size="16777216"
 deviceinfo_flash_pagesize="2048"
 deviceinfo_flash_offset_base="0x00000000"
