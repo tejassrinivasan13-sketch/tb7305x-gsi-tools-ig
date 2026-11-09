@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - 'codex/ut-kernel-first-build'
+    paths:
+      - 'stock_config.txt'
+      - 'tb7305x-stock-exact.dtb'
   workflow_dispatch:
 
 permissions:
