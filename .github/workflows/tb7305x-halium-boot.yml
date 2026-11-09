@@ -1,4 +1,4 @@
-name: TB-7305X Halium 9 ARM64 boot candidate
+name: TB-7305X Halium 9 Ubuntu Touch image candidate
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ca-certificates cpio curl flex git jq kmod libssl-dev libtinfo5 python3 unzip wget xz-utils
+          sudo apt-get install -y android-sdk-libsparse-utils bc bison build-essential ca-certificates cpio curl fakeroot flex git jq kmod libssl-dev libtinfo5 python3 unzip wget xz-utils
 
       - name: Fetch UBports build tools and kernel sources
         run: |
@@ -76,17 +76,21 @@ jobs:
           print(f"Patched {path}")
           PY
           cd "$GITHUB_WORKSPACE/adaptation"
-          ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out" -k
+          ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out"
           mkdir -p "$GITHUB_WORKSPACE/halium-boot-artifact"
+          cd "$GITHUB_WORKSPACE/adaptation"
+          ./build/prepare-fake-ota.sh "$RUNNER_TEMP/tb7305x-out/device_mt8765_P_usrmerge.tar.xz" "$RUNNER_TEMP/tb7305x-ota"
+          ./build/system-image-from-ota.sh "$RUNNER_TEMP/tb7305x-ota/ubuntu_command" "$RUNNER_TEMP/tb7305x-images"
           cp "$RUNNER_TEMP/tb7305x-work/tmp/partitions/boot.img" "$GITHUB_WORKSPACE/halium-boot-artifact/"
           cp "$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ/.config" "$GITHUB_WORKSPACE/halium-boot-artifact/kernel.config"
           cp "$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ/arch/arm64/boot/Image.gz-dtb" "$GITHUB_WORKSPACE/halium-boot-artifact/"
+          find "$RUNNER_TEMP/tb7305x-images" -maxdepth 1 -type f -exec cp {} "$GITHUB_WORKSPACE/halium-boot-artifact/" \\;
           sha256sum "$GITHUB_WORKSPACE/halium-boot-artifact/"* > "$GITHUB_WORKSPACE/halium-boot-artifact/SHA256SUMS.txt"
-          ls -l "$GITHUB_WORKSPACE/halium-boot-artifact"
+          ls -lh "$GITHUB_WORKSPACE/halium-boot-artifact"
 
       - name: Upload experimental Halium boot image
         uses: actions/upload-artifact@v4
         with:
-          name: tb7305x-halium9-arm64-boot-candidate
+          name: tb7305x-halium9-ubuntu-touch-image-candidate
           path: halium-boot-artifact/
           retention-days: 30
