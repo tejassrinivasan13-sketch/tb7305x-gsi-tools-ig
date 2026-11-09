@@ -27,7 +27,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ca-certificates cpio curl fakeroot flex git jq kmod libssl-dev libtinfo5 python3 python3-lib2to3 unzip wget xz-utils
+          sudo apt-get install -y bc bison build-essential ca-certificates cpio curl device-tree-compiler fakeroot flex git jq kmod libssl-dev libtinfo5 python3 python3-lib2to3 unzip wget xz-utils
 
       - name: Fetch UBports build tools and kernel sources
         run: |
@@ -90,7 +90,7 @@ jobs:
           fragment = defconfig + """
           "$KERNEL_DIR/scripts/config" --file "$OUT/.config" \\
               --enable DEVTMPFS --enable FHANDLE --enable SYSVIPC --enable NAMESPACES \\
-              --enable UTS_NS --enable IPC_NS --enable USER_NS --enable PID_NS --enable NET_NS --enable VT
+              --enable UTS_NS --enable IPC_NS --enable USER_NS --enable PID_NS --enable NET_NS --enable VT --enable OF_OVERLAY
           make O="$OUT" olddefconfig
           """
           source = source.replace(defconfig, fragment, 1)
@@ -102,7 +102,8 @@ jobs:
           if marker not in source:
               raise SystemExit("could not locate built-image check")
           source = source.replace(marker, """
-          cat "$OUT/arch/arm64/boot/Image.gz" "$TB7305X_STOCK_DTB" > "$OUT/arch/arm64/boot/Image.gz-dtb"
+          fdtoverlay -i "$TB7305X_STOCK_DTB" -o "$OUT/arch/arm64/boot/dts/mediatek/mt6739-tb7305x-merged.dtb" "$OUT/arch/arm64/boot/dts/mediatek/mt8765_P.dtb"
+          cat "$OUT/arch/arm64/boot/Image.gz" "$OUT/arch/arm64/boot/dts/mediatek/mt6739-tb7305x-merged.dtb" > "$OUT/arch/arm64/boot/Image.gz-dtb"
           ls "$OUT/arch/$ARCH/boot/"*Image*
           """, 1)
           path.write_text(source)
@@ -147,12 +148,12 @@ jobs:
           PY
           cat > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/README.txt" <<'EOF'
           EXPERIMENTAL, UNFLASHED TEST CANDIDATE
-          This artifact adds the kernel source tree's mt8765_P device-tree overlay
-          to the existing experimental Halium boot image. The DTBO image uses
-          the stock firmware's observed format: DTBO v0, 2048-byte page size,
-          one entry with id 0. It has not been tested on the tablet.
-          Do not flash boot.img or dtbo.img. This build is for inspection and
-          further diagnosis only.
+          This artifact merges the kernel source tree's mt8765_P overlay into
+          the stock TB-7305X base DTB before packaging it with the Halium kernel.
+          The previous candidate paired mismatched device-tree pieces. This
+          candidate is still untested; the kernel source has known device-tree
+          problems. Do not flash boot.img or dtbo.img. Restore the stock DTBO
+          before any temporary boot test; this artifact is for diagnosis only.
           EOF
           sha256sum "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"* > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/SHA256SUMS.txt"
           ls -lh "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate"
