@@ -130,7 +130,6 @@ jobs:
           cp "$kernel_obj/arch/arm64/boot/dts/mediatek/mt6739.dtb" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
           cp "$overlay_dtb" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
           cp "$kernel_obj/.config" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/kernel.config"
-          cp "$kernel_obj/arch/arm64/boot/dts/dtboimg.cfg" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
           python3 - "$overlay_dtb" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/dtbo.img" <<'PY'
           import pathlib, struct, sys
           data = pathlib.Path(sys.argv[1]).read_bytes()
