@@ -76,6 +76,16 @@ jobs:
           print(f"Patched {path}")
           PY
           cd "$GITHUB_WORKSPACE/adaptation"
+          python3 - "$GITHUB_WORKSPACE/adaptation/build-tarball-mainline.sh" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          source = path.read_text()
+          old = 'cp -av overlay/* "${dir}/"'
+          new = 'if [ -d overlay ]; then cp -av overlay/. "${dir}/"; fi'
+          if old not in source:
+              raise SystemExit("could not locate optional overlay copy command")
+          path.write_text(source.replace(old, new, 1))
+          PY
           ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out"
           mkdir -p "$GITHUB_WORKSPACE/halium-boot-artifact"
           cd "$GITHUB_WORKSPACE/adaptation"
@@ -84,7 +94,9 @@ jobs:
           cp "$RUNNER_TEMP/tb7305x-work/tmp/partitions/boot.img" "$GITHUB_WORKSPACE/halium-boot-artifact/"
           cp "$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ/.config" "$GITHUB_WORKSPACE/halium-boot-artifact/kernel.config"
           cp "$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ/arch/arm64/boot/Image.gz-dtb" "$GITHUB_WORKSPACE/halium-boot-artifact/"
-          find "$RUNNER_TEMP/tb7305x-images" -maxdepth 1 -type f -exec cp {} "$GITHUB_WORKSPACE/halium-boot-artifact/" \\;
+          for image in "$RUNNER_TEMP"/tb7305x-images/*; do
+            [ -f "$image" ] && cp "$image" "$GITHUB_WORKSPACE/halium-boot-artifact/"
+          done
           sha256sum "$GITHUB_WORKSPACE/halium-boot-artifact/"* > "$GITHUB_WORKSPACE/halium-boot-artifact/SHA256SUMS.txt"
           ls -lh "$GITHUB_WORKSPACE/halium-boot-artifact"
 
