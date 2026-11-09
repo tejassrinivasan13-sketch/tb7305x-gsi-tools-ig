@@ -37,8 +37,6 @@ jobs:
           cp tb7305x-stock-exact.dtb adaptation/
           cd adaptation
           ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out" -c
-          echo "=== downloaded build sources ==="
-          find "$RUNNER_TEMP/tb7305x-work/downloads" -maxdepth 2 -type d | sort | head -n 60
           test -d "$RUNNER_TEMP/tb7305x-work/downloads/android_kernel_lenovo_mt8765_P"
 
       - name: Add Halium kernel options and build boot image
@@ -46,7 +44,7 @@ jobs:
           set -euo pipefail
           export TB7305X_STOCK_DTB="$GITHUB_WORKSPACE/tb7305x-stock-exact.dtb"
           python3 - "$GITHUB_WORKSPACE/adaptation" <<'PY'
-          import pathlib, re, sys
+          import pathlib, sys
           root = pathlib.Path(sys.argv[1])
           scripts = list(root.rglob("build-kernel.sh"))
           if len(scripts) != 1:
@@ -67,3 +65,28 @@ jobs:
           if compile not in source:
               raise SystemExit("could not locate kernel build command")
           source = source.replace(compile, compile + ' Image.gz modules', 1)
+          marker = 'ls "$OUT/arch/$ARCH/boot/"*Image*'
+          if marker not in source:
+              raise SystemExit("could not locate built-image check")
+          source = source.replace(marker, '''
+          cat "$OUT/arch/arm64/boot/Image.gz" "$TB7305X_STOCK_DTB" > "$OUT/arch/arm64/boot/Image.gz-dtb"
+          ls "$OUT/arch/$ARCH/boot/"*Image*
+          ''', 1)
+          path.write_text(source)
+          print(f"Patched {path}")
+          PY
+          cd "$GITHUB_WORKSPACE/adaptation"
+          ./build.sh -b "$RUNNER_TEMP/tb7305x-work" -o "$RUNNER_TEMP/tb7305x-out" -k
+          mkdir -p "$GITHUB_WORKSPACE/halium-boot-artifact"
+          cp "$RUNNER_TEMP/tb7305x-work/tmp/partitions/boot.img" "$GITHUB_WORKSPACE/halium-boot-artifact/"
+          cp "$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ/.config" "$GITHUB_WORKSPACE/halium-boot-artifact/kernel.config"
+          cp "$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ/arch/arm64/boot/Image.gz-dtb" "$GITHUB_WORKSPACE/halium-boot-artifact/"
+          sha256sum "$GITHUB_WORKSPACE/halium-boot-artifact/"* > "$GITHUB_WORKSPACE/halium-boot-artifact/SHA256SUMS.txt"
+          ls -l "$GITHUB_WORKSPACE/halium-boot-artifact"
+
+      - name: Upload experimental Halium boot image
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb7305x-halium9-arm64-boot-candidate
+          path: halium-boot-artifact/
+          retention-days: 30
