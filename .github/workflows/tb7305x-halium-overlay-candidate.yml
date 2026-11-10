@@ -125,7 +125,35 @@ jobs:
           kernel_obj="$RUNNER_TEMP/tb7305x-work/downloads/KERNEL_OBJ"
           test -f "$kernel_obj/arch/arm64/boot/Image.gz-dtb"
           overlay_dtb="$kernel_obj/arch/arm64/boot/dts/mediatek/mt8765_P.dtb"
+          base_dtb="$kernel_obj/arch/arm64/boot/dts/mediatek/mt6739.dtb"
           test -f "$overlay_dtb"
+          test -f "$base_dtb"
+          fdtoverlay -i "$TB7305X_STOCK_DTB" -o "$RUNNER_TEMP/tb7305x-overlay-merge-check.dtb" "$overlay_dtb"
+          python3 - "$kernel_obj/.config" "$kernel_obj/arch/arm64/boot/Image.gz" "$kernel_obj/arch/arm64/boot/Image.gz-dtb" "$TB7305X_STOCK_DTB" <<'PY'
+          import pathlib, sys
+          config, image_gz, image_gz_dtb, stock_dtb = map(pathlib.Path, sys.argv[1:])
+          lines = set(config.read_text().splitlines())
+          required = [
+              "CONFIG_ARM64=y", "CONFIG_COMPAT=y", "CONFIG_DEVTMPFS=y",
+              "CONFIG_FHANDLE=y", "CONFIG_SYSVIPC=y", "CONFIG_NAMESPACES=y",
+              "CONFIG_UTS_NS=y", "CONFIG_IPC_NS=y", "CONFIG_USER_NS=y",
+              "CONFIG_PID_NS=y", "CONFIG_NET_NS=y", "CONFIG_VT=y",
+              "CONFIG_MTK_DTBO_FEATURE=y", "CONFIG_PSTORE=y",
+              "CONFIG_PSTORE_CONSOLE=y", "CONFIG_PSTORE_RAM=y",
+          ]
+          missing = [item for item in required if item not in lines]
+          if missing:
+              raise SystemExit("missing required kernel options: " + ", ".join(missing))
+          gz = image_gz.read_bytes()
+          combined = image_gz_dtb.read_bytes()
+          if gz[:2] != bytes.fromhex("1f8b"):
+              raise SystemExit("Image.gz is not gzip-compressed")
+          if combined != gz + stock_dtb.read_bytes():
+              raise SystemExit("Image.gz-dtb is not Image.gz plus the stock base DTB exactly once")
+          print("PASS: ARM64/Halium kernel configuration")
+          print("PASS: kernel image gzip header")
+          print("PASS: boot image contains stock base DTB exactly once")
+          PY
           mkdir -p "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate"
           cp "$RUNNER_TEMP/tb7305x-work/tmp/partitions/boot.img" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
           cp "$kernel_obj/arch/arm64/boot/Image.gz-dtb" "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"
@@ -145,17 +173,42 @@ jobs:
           total_size = data_offset + len(data)
           header = struct.pack(">8I", 0xd7b7ab1e, total_size, header_size, entry_size, 1, entries_offset, page, 0)
           entry = struct.pack(">8I", len(data), data_offset, 0, 0, 0, 0, 0, 0)
-          pathlib.Path(sys.argv[2]).write_bytes(header + entry + bytes(data_offset - header_size - entry_size) + data)
+          dtbo_path = pathlib.Path(sys.argv[2])
+          dtbo_path.write_bytes(header + entry + bytes(data_offset - header_size - entry_size) + data)
+          packed = dtbo_path.read_bytes()
+          magic, total, hdr, entsz, count, entoff, pagesz, version = struct.unpack_from(">8I", packed)
+          size, dataoff, *_ = struct.unpack_from(">8I", packed, entoff)
+          if magic != 0xd7b7ab1e or total != len(packed) or hdr != 32 or entsz != 32 or count != 1 or pagesz != page or version != 0:
+              raise SystemExit("invalid DTBO image header")
+          if dataoff % page or size != len(data) or packed[dataoff:dataoff + size] != data:
+              raise SystemExit("invalid DTBO entry payload")
+          PY
+          cat > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/CHECKS.txt" <<'EOF'
+          PASS: kernel configuration includes ARM64, Halium namespace/device nodes,
+          MediaTek DTBO support, and pstore console options.
+          PASS: Image.gz gzip header is valid.
+          PASS: Image.gz-dtb contains the stock base DTB exactly once.
+          PASS: device overlay applies to the stock DTB with fdtoverlay.
+          PASS: DTBO header and payload are structurally consistent.
+          PASS: generated boot.img has Android boot magic and fits the 16 MiB boot partition.
+          EOF
+          python3 - "$RUNNER_TEMP/tb7305x-work/tmp/partitions/boot.img" <<'PY'
+          import pathlib, sys
+          boot = pathlib.Path(sys.argv[1]).read_bytes()
+          if not boot.startswith(b"ANDROID!") or len(boot) > 16 * 1024 * 1024:
+              raise SystemExit("boot.img header or size check failed")
+          print("PASS: boot.img header and 16 MiB partition size")
           PY
           cat > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/README.txt" <<'EOF'
-          EXPERIMENTAL, UNFLASHED TEST CANDIDATE
-          boot.img contains the kernel plus the stock TB-7305X base DTB only.
-          dtbo.img contains the kernel source tree's mt8765_P device-tree overlay.
-          These are a matched pair: the bootloader should apply the overlay once.
-          Do not combine this boot.img with a boot image that already has the
-          overlay merged into its DTB. This candidate is still untested and the
-          kernel source has known device-tree problems. Do not flash these files.
-          This artifact is for diagnosis only.
+          EXPERIMENTAL, UNFLASHED KERNEL TEST CANDIDATE
+          boot.img contains the kernel, Halium startup files, and the stock
+          TB-7305X base DTB only. dtbo.img contains the mt8765_P device overlay.
+          The bootloader should apply the overlay once. This package has no
+          system.img or rootfs.img and cannot start the Ubuntu Touch interface.
+          Build checks are recorded in CHECKS.txt. The kernel source has known
+          device-tree problems, so the images are untested on this tablet.
+          Do not flash these files.
+          EOF
           EOF
           sha256sum "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"* > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/SHA256SUMS.txt"
           ls -lh "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate"
