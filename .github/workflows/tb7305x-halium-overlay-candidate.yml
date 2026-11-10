@@ -209,7 +209,6 @@ jobs:
           device-tree problems, so the images are untested on this tablet.
           Do not flash these files.
           EOF
-          EOF
           sha256sum "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/"* > "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate/SHA256SUMS.txt"
           ls -lh "$GITHUB_WORKSPACE/tb7305x-overlay-test-candidate"
 
